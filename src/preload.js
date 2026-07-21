@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld("api", {
   saveFileAs: (content) => ipcRenderer.invoke("save-file-as", { content }),
   openFolder: () => ipcRenderer.invoke("open-folder"),
   readFolder: (folderPath) => ipcRenderer.invoke("read-folder", { folderPath }),
-  openFileFromPath: (filePath) => ipcRenderer.invoke("open-file-path", { filePath })
+  openFileFromPath: (filePath) => ipcRenderer.invoke("open-file-path", { filePath }),
+  runTerminalCommand: (command) => ipcRenderer.invoke("run-terminal-command", { command })
 });

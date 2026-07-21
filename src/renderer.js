@@ -9,6 +9,8 @@ const currentFolder = document.getElementById("currentFolder");
 const fileTree = document.getElementById("fileTree");
 const editorStatus = document.getElementById("editorStatus");
 const consoleLog = document.getElementById("consoleLog");
+const terminalOutput = document.getElementById("terminalOutput");
+const terminalInput = document.getElementById("terminalInput");
 const portalWebview = document.getElementById("portalWebview");
 const browserUrl = document.getElementById("browserUrl");
 const btnBack = document.getElementById("btnBack");
@@ -29,6 +31,42 @@ function log(message, type = "info") {
 
 function setStatus(message) {
   editorStatus.textContent = message;
+}
+
+function appendTerminalOutput(text) {
+  const line = document.createElement("div");
+  line.textContent = text;
+  terminalOutput.appendChild(line);
+  terminalOutput.scrollTop = terminalOutput.scrollHeight;
+}
+
+async function runTerminalCommand() {
+  const command = terminalInput.value.trim();
+  if (!command) {
+    return;
+  }
+
+  appendTerminalOutput(`$ ${command}`);
+  terminalInput.value = "";
+  setStatus(`Running: ${command}`);
+
+  try {
+    const result = await window.api.runTerminalCommand(command);
+    if (result && result.output) {
+      appendTerminalOutput(result.output.trim());
+    }
+    if (result && result.error) {
+      appendTerminalOutput(result.error.trim());
+    }
+    if (result && result.success) {
+      setStatus(`Finished: ${command}`);
+    } else {
+      setStatus(`Command failed: ${command}`);
+    }
+  } catch (error) {
+    appendTerminalOutput(error.message || String(error));
+    setStatus("Terminal command failed");
+  }
 }
 
 function setFileName(name) {
@@ -92,6 +130,12 @@ btnNew.addEventListener("click", () => {
 btnOpen.addEventListener("click", openFile);
 btnSave.addEventListener("click", saveFile);
 btnSaveAs.addEventListener("click", saveFileAs);
+terminalInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    runTerminalCommand();
+  }
+});
 btnOpenFolder.addEventListener('click', async () => {
   const folder = await window.api.openFolder();
   if (!folder) {

@@ -118,6 +118,28 @@ ipcMain.handle("open-file-path", async (event, { filePath }) => {
   return { filePath, content, name: path.basename(filePath) };
 });
 
+ipcMain.handle("run-terminal-command", async (event, { command }) => {
+  if (!command || typeof command !== "string") {
+    return { success: false, output: "", error: "No command provided" };
+  }
+
+  try {
+    return await new Promise((resolve) => {
+      const { exec } = require("child_process");
+      const cwd = app.getPath("home");
+      exec(command, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) {
+          resolve({ success: false, output: stdout, error: stderr || error.message });
+        } else {
+          resolve({ success: true, output: stdout || stderr || "", error: stderr || "" });
+        }
+      });
+    });
+  } catch (e) {
+    return { success: false, output: "", error: e && e.message ? e.message : String(e) };
+  }
+});
+
 ipcMain.handle("open-file", async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: "Open file",
