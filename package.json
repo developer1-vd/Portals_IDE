@@ -1,0 +1,14 @@
+{
+  "name": "portals-ide",
+  "productName": "Portals IDE",
+  "version": "0.1.0",
+  "description": "A lightweight IDE for browsing web content and coding side by side.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "keywords": ["IDE", "electron", "browser", "code"],
+  "author": "",
+  "license": "MIT"
+}

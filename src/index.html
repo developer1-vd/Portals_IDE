@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portals IDE</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="header-bar">
+      <div class="brand">
+        <div class="brand-mark">
+          <img src="assets/app-icon.png" alt="Portals IDE logo" />
+        </div>
+        <div>
+          <div class="brand-name">Portals IDE</div>
+          <div class="brand-tag">Browse, code, learn</div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btnNew">New</button>
+        <button id="btnOpen">Open</button>
+        <button id="btnSave">Save</button>
+        <button id="btnSaveAs">Save As</button>
+        <button id="btnTheme">Toggle Theme</button>
+        <button id="btnOpenFolder">Open Folder</button>
+      </div>
+    </header>
+
+    <main class="workspace-grid">
+      <aside class="panel panel-light">
+        <div class="panel-title">Workspace</div>
+        <div class="panel-section">
+          <div class="panel-label">Current file</div>
+          <div id="currentFileName" class="file-name">untitled.txt</div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-label">Quick links</div>
+          <button class="link-button" data-url="https://duckduckgo.com">Search Web</button>
+          <button class="link-button" data-url="https://github.com">GitHub</button>
+          <button class="link-button" data-url="https://stackoverflow.com">Stack Overflow</button>
+        </div>
+        <div class="panel-section">
+          <div class="panel-label">File Explorer</div>
+          <div id="currentFolder" class="file-name">No folder opened</div>
+          <div id="fileTree" class="file-tree"></div>
+        </div>
+      </aside>
+
+      <section class="editor-panel panel panel-dark">
+        <div class="panel-title">Code editor</div>
+        <div class="editor-toolbar">
+          <span id="editorStatus">Ready to edit</span>
+          <span class="toolbar-spacer"></span>
+          <span class="hint">Use the browser panel to research code while you edit.</span>
+        </div>
+        <textarea id="editor" spellcheck="false" placeholder="Start typing code or paste content here..."></textarea>
+      </section>
+
+      <section class="browser-panel panel panel-light">
+        <div class="panel-title">Browser</div>
+        <div class="browser-controls">
+          <button id="btnBack">‹</button>
+          <button id="btnForward">›</button>
+          <button id="btnReload">⟳</button>
+          <input id="browserUrl" type="text" placeholder="https://example.com" />
+          <button id="btnGo">Go</button>
+        </div>
+        <div class="browser-content">
+          <webview id="portalWebview" src="https://duckduckgo.com" autosize="on" allowpopups></webview>
+        </div>
+      </section>
+
+      <section class="console-panel panel panel-dark">
+        <div class="panel-title">Notifications</div>
+        <div id="consoleLog" class="console-log"></div>
+      </section>
+    </main>
+  </div>
+  <script src="theme.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
