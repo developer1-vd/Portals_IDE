@@ -1,6 +1,22 @@
 const { app, BrowserWindow, ipcMain, dialog, nativeImage } = require("electron");
+const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+
+function readEnvFile() {
+  const envPath = path.join(__dirname, ".env");
+  if (!fs.existsSync(envPath)) {
+    return {};
+  }
+
+  return fs.readFileSync(envPath, "utf8").split(/\r?\n/).reduce((env, line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return env;
+    const [key, ...rest] = trimmed.split("=");
+    env[key] = rest.join("=").trim();
+    return env;
+  }, {});
+}
 
 function readFolder(directory) {
   const entries = fs.readdirSync(directory, { withFileTypes: true });
@@ -118,20 +134,69 @@ ipcMain.handle("open-file-path", async (event, { filePath }) => {
   return { filePath, content, name: path.basename(filePath) };
 });
 
+function getShellConfig() {
+  if (process.platform === "win32") {
+    return {
+      executable: process.env.ComSpec || "cmd.exe",
+      args: (command) => ["/d", "/s", "/c", command]
+    };
+  }
+
+  const env = readEnvFile();
+  const customShell = env.TERMINAL_SHELL || process.env.SHELL || "/bin/zsh";
+  const shellName = path.basename(customShell).toLowerCase();
+
+  if (shellName === "zsh") {
+    return {
+      executable: customShell,
+      args: (command) => ["-ic", command]
+    };
+  }
+
+  return {
+    executable: customShell,
+    args: (command) => ["-lc", command]
+  };
+}
+
 ipcMain.handle("run-terminal-command", async (event, { command }) => {
   if (!command || typeof command !== "string") {
     return { success: false, output: "", error: "No command provided" };
   }
 
   try {
+    const cwd = app.getPath("home");
+    const shell = getShellConfig();
     return await new Promise((resolve) => {
-      const { exec } = require("child_process");
-      const cwd = app.getPath("home");
-      exec(command, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
-        if (error) {
-          resolve({ success: false, output: stdout, error: stderr || error.message });
-        } else {
+      const child = spawn(shell.executable, shell.args(command), {
+        cwd,
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        },
+        shell: false
+      });
+
+      let stdout = "";
+      let stderr = "";
+
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      child.on("error", (error) => {
+        resolve({ success: false, output: stdout, error: stderr || error.message });
+      });
+
+      child.on("close", (code) => {
+        if (code === 0) {
           resolve({ success: true, output: stdout || stderr || "", error: stderr || "" });
+        } else {
+          resolve({ success: false, output: stdout, error: stderr || `Exited with code ${code}` });
         }
       });
     });

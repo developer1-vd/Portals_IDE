@@ -25,6 +25,17 @@ Portals IDE is a clean Electron-based workspace for browsing the web and editing
 2. Select a local folder to display its file tree in the workspace sidebar.
 3. Click files to open them in the editor.
 
+## Custom shell configuration
+
+1. Copy `.env.example` to `.env`.
+2. Set your preferred terminal shell:
+   ```env
+   TERMINAL_SHELL=/usr/bin/zsh
+   ```
+3. Save and restart Portals IDE.
+
+The app will use `TERMINAL_SHELL` for the built-in terminal if set, otherwise it falls back to your system `SHELL`.
+
 ## Features
 
 - Modern and clean UI with browser and editor panels.

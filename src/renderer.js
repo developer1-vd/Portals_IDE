@@ -11,6 +11,7 @@ const editorStatus = document.getElementById("editorStatus");
 const consoleLog = document.getElementById("consoleLog");
 const terminalOutput = document.getElementById("terminalOutput");
 const terminalInput = document.getElementById("terminalInput");
+const terminalRun = document.getElementById("terminalRun");
 const portalWebview = document.getElementById("portalWebview");
 const browserUrl = document.getElementById("browserUrl");
 const btnBack = document.getElementById("btnBack");
@@ -136,6 +137,9 @@ terminalInput.addEventListener("keydown", (event) => {
     runTerminalCommand();
   }
 });
+if (terminalRun) {
+  terminalRun.addEventListener("click", runTerminalCommand);
+}
 btnOpenFolder.addEventListener('click', async () => {
   const folder = await window.api.openFolder();
   if (!folder) {
@@ -236,6 +240,8 @@ function renderFileTree(tree, parent) {
     parent.appendChild(node);
   });
 }
+
+appendTerminalOutput("Terminal ready. Type a command and press Enter or Run.");
 
 linkButtons.forEach((button) => {
   button.addEventListener("click", () => {
