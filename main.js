@@ -1,7 +1,21 @@
 const { app, BrowserWindow, ipcMain, dialog, nativeImage } = require("electron");
-const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const https = require("https");
+const http = require("http");
+
+const terminalSessions = new Map();
+let cachedPtyModule = null;
+
+function getPtyModule() {
+  if (cachedPtyModule) return cachedPtyModule;
+  try {
+    cachedPtyModule = require("node-pty");
+    return cachedPtyModule;
+  } catch (_error) {
+    return null;
+  }
+}
 
 function readEnvFile() {
   const envPath = path.join(__dirname, ".env");
@@ -138,71 +152,104 @@ function getShellConfig() {
   if (process.platform === "win32") {
     return {
       executable: process.env.ComSpec || "cmd.exe",
-      args: (command) => ["/d", "/s", "/c", command]
+      args: []
     };
   }
 
   const env = readEnvFile();
   const customShell = env.TERMINAL_SHELL || process.env.SHELL || "/bin/zsh";
-  const shellName = path.basename(customShell).toLowerCase();
-
-  if (shellName === "zsh") {
-    return {
-      executable: customShell,
-      args: (command) => ["-ic", command]
-    };
-  }
-
   return {
     executable: customShell,
-    args: (command) => ["-lc", command]
+    args: ["-i"]
   };
 }
 
-ipcMain.handle("run-terminal-command", async (event, { command }) => {
-  if (!command || typeof command !== "string") {
-    return { success: false, output: "", error: "No command provided" };
-  }
+function killTerminalForWebContents(webContentsId) {
+  const session = terminalSessions.get(webContentsId);
+  if (!session) return;
 
   try {
-    const cwd = app.getPath("home");
-    const shell = getShellConfig();
-    return await new Promise((resolve) => {
-      const child = spawn(shell.executable, shell.args(command), {
-        cwd,
-        env: {
-          ...process.env,
-          TERM: "xterm-256color"
-        },
-        shell: false
-      });
-
-      let stdout = "";
-      let stderr = "";
-
-      child.stdout.on("data", (chunk) => {
-        stdout += chunk.toString();
-      });
-
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString();
-      });
-
-      child.on("error", (error) => {
-        resolve({ success: false, output: stdout, error: stderr || error.message });
-      });
-
-      child.on("close", (code) => {
-        if (code === 0) {
-          resolve({ success: true, output: stdout || stderr || "", error: stderr || "" });
-        } else {
-          resolve({ success: false, output: stdout, error: stderr || `Exited with code ${code}` });
-        }
-      });
-    });
-  } catch (e) {
-    return { success: false, output: "", error: e && e.message ? e.message : String(e) };
+    session.ptyProcess.kill();
+  } catch (error) {
+    console.warn("Failed to kill terminal session", error);
   }
+  terminalSessions.delete(webContentsId);
+}
+
+ipcMain.handle("terminal-start", (event, options = {}) => {
+  const pty = getPtyModule();
+  if (!pty) {
+    return {
+      success: false,
+      error: "Missing terminal dependency: node-pty. Run npm install in project root."
+    };
+  }
+
+  const webContents = event.sender;
+  const webContentsId = webContents.id;
+  killTerminalForWebContents(webContentsId);
+
+  const env = readEnvFile();
+  const shell = getShellConfig();
+  const cols = Number(options.cols) || 100;
+  const rows = Number(options.rows) || 24;
+  const cwd = env.TERMINAL_CWD || app.getPath("home");
+
+  const ptyProcess = pty.spawn(shell.executable, shell.args, {
+    name: "xterm-256color",
+    cols,
+    rows,
+    cwd,
+    env: {
+      ...process.env,
+      TERM: "xterm-256color"
+    }
+  });
+
+  ptyProcess.onData((data) => {
+    if (!webContents.isDestroyed()) {
+      webContents.send("terminal-data", data);
+    }
+  });
+
+  ptyProcess.onExit(({ exitCode }) => {
+    if (!webContents.isDestroyed()) {
+      webContents.send("terminal-exit", { exitCode });
+    }
+    terminalSessions.delete(webContentsId);
+  });
+
+  terminalSessions.set(webContentsId, { ptyProcess });
+  return { success: true };
+});
+
+ipcMain.on("terminal-input", (event, data) => {
+  const session = terminalSessions.get(event.sender.id);
+  if (!session) return;
+  session.ptyProcess.write(typeof data === "string" ? data : "");
+});
+
+ipcMain.on("terminal-resize", (event, { cols, rows }) => {
+  const session = terminalSessions.get(event.sender.id);
+  if (!session) return;
+
+  const safeCols = Math.max(20, Number(cols) || 80);
+  const safeRows = Math.max(5, Number(rows) || 24);
+  try {
+    session.ptyProcess.resize(safeCols, safeRows);
+  } catch (error) {
+    console.warn("Failed to resize terminal", error);
+  }
+});
+
+ipcMain.on("terminal-kill", (event) => {
+  killTerminalForWebContents(event.sender.id);
+});
+
+app.on("web-contents-created", (_event, webContents) => {
+  webContents.on("destroyed", () => {
+    killTerminalForWebContents(webContents.id);
+  });
 });
 
 ipcMain.handle("open-file", async () => {
@@ -248,5 +295,247 @@ ipcMain.handle("save-file-as", async (event, { content }) => {
 
   fs.writeFileSync(filePath, content, "utf8");
   return { filePath, name: path.basename(filePath) };
+});
+
+const pendingPermissions = new Map();
+let permissionIdCounter = 0;
+
+ipcMain.handle("ai-chat", async (event, { message, history }) => {
+  const env = readEnvFile();
+  const provider = (env.AI_PROVIDER || "anthropic").toLowerCase();
+
+  if (provider === "anthropic") {
+    return handleAnthropicChat(env, message, history);
+  } else if (provider === "ollama") {
+    return handleOllamaChat(env, message, history);
+  } else if (provider === "fireworks") {
+    return handleFireworksChat(env, message, history);
+  }
+
+  return { error: `Unknown AI provider: ${provider}` };
+});
+
+function handleAnthropicChat(env, message, history) {
+  const apiKey = env.ANTHROPIC_API_KEY;
+
+  if (!apiKey) {
+    return Promise.resolve({ error: "ANTHROPIC_API_KEY not set in .env" });
+  }
+
+  const messages = [
+    ...history,
+    { role: "user", content: message }
+  ];
+
+  return new Promise((resolve) => {
+    const data = JSON.stringify({ model: "claude-3-5-sonnet-20241022", max_tokens: 1024, messages });
+    const req = https.request({
+      hostname: "api.anthropic.com",
+      port: 443,
+      path: "/v1/messages",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": data.length,
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01"
+      }
+    }, (res) => {
+      let responseData = "";
+      res.on("data", (chunk) => { responseData += chunk; });
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(responseData);
+          const content = parsed.content && parsed.content[0] && parsed.content[0].text;
+          resolve({ success: true, response: content || "No response" });
+        } catch (e) {
+          resolve({ error: "Failed to parse API response" });
+        }
+      });
+    });
+
+    req.on("error", (e) => {
+      resolve({ error: e.message });
+    });
+
+    req.write(data);
+    req.end();
+  });
+}
+
+function handleOllamaChat(env, message, history) {
+  const ollamaUrl = env.OLLAMA_URL || "http://localhost:11434";
+  const ollamaModel = env.OLLAMA_MODEL || "llama2";
+
+  const messages = [
+    ...history,
+    { role: "user", content: message }
+  ];
+
+  return new Promise((resolve) => {
+    const data = JSON.stringify({ model: ollamaModel, messages, stream: false });
+    const url = new URL(ollamaUrl);
+    const options = {
+      hostname: url.hostname,
+      port: url.port || 11434,
+      path: "/api/chat",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": data.length
+      }
+    };
+
+    const req = http.request(options, (res) => {
+      let responseData = "";
+      res.on("data", (chunk) => { responseData += chunk; });
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(responseData);
+          resolve({ success: true, response: parsed.message.content || "No response" });
+        } catch (e) {
+          resolve({ error: "Failed to parse Ollama response" });
+        }
+      });
+    });
+
+    req.on("error", (e) => {
+      resolve({ error: `Ollama connection failed: ${e.message}` });
+    });
+
+    req.write(data);
+    req.end();
+  });
+}
+
+function handleFireworksChat(env, message, history) {
+  const apiKey = env.FIREWORKS_API_KEY;
+  const model = env.FIREWORKS_MODEL || "accounts/fireworks/models/llama-v2-7b-chat";
+
+  if (!apiKey) {
+    return Promise.resolve({ error: "FIREWORKS_API_KEY not set in .env" });
+  }
+
+  const messages = [
+    ...history,
+    { role: "user", content: message }
+  ];
+
+  return new Promise((resolve) => {
+    const data = JSON.stringify({ model, messages, max_tokens: 1024 });
+    const req = https.request({
+      hostname: "api.fireworks.ai",
+      port: 443,
+      path: "/inference/v1/chat/completions",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": data.length,
+        "Authorization": `Bearer ${apiKey}`
+      }
+    }, (res) => {
+      let responseData = "";
+      res.on("data", (chunk) => { responseData += chunk; });
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(responseData);
+          const content = parsed.choices && parsed.choices[0] && parsed.choices[0].message && parsed.choices[0].message.content;
+          resolve({ success: true, response: content || "No response" });
+        } catch (e) {
+          resolve({ error: "Failed to parse Fireworks response" });
+        }
+      });
+    });
+
+    req.on("error", (e) => {
+      resolve({ error: e.message });
+    });
+
+    req.write(data);
+    req.end();
+  });
+}
+
+ipcMain.handle("ai-request-permission", async (event, { type, details }) => {
+  const id = ++permissionIdCounter;
+  const webContents = event.sender;
+
+  let message = "";
+  if (type === "file_read") {
+    message = `AI wants to read: ${details.filePath}`;
+  } else if (type === "file_write") {
+    message = `AI wants to write to: ${details.filePath}`;
+  } else if (type === "command_exec") {
+    message = `AI wants to run: ${details.command}`;
+  }
+
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    buttons: ["Deny", "Allow"],
+    title: "AI Permission Request",
+    message,
+    detail: `This will be executed with your current user permissions.`
+  });
+
+  return { permitted: response === 1 };
+});
+
+ipcMain.handle("ai-get-sudo-password", async () => {
+  const { response, checkboxChecked } = await dialog.showMessageBox({
+    type: "question",
+    buttons: ["Cancel"],
+    cancelId: 0,
+    title: "Sudo Password Required",
+    message: "This command requires sudo access",
+    detail: "Enter your password in the terminal prompt that will appear."
+  });
+
+  return { ok: response !== 0 };
+});
+
+ipcMain.handle("ai-read-file", async (event, { filePath }) => {
+  try {
+    const content = fs.readFileSync(filePath, "utf8");
+    return { success: true, content };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle("ai-write-file", async (event, { filePath, content }) => {
+  try {
+    fs.writeFileSync(filePath, content, "utf8");
+    return { success: true };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle("ai-exec-command", async (event, { command, sudoPassword }) => {
+  const { spawn } = require("child_process");
+
+  return new Promise((resolve) => {
+    let cmd = command;
+    let args = [];
+    let opts = { shell: true };
+
+    if (sudoPassword) {
+      cmd = `echo "${sudoPassword}" | sudo -S ${command}`;
+    }
+
+    const proc = spawn(cmd, args, opts);
+    let stdout = "";
+    let stderr = "";
+
+    proc.stdout.on("data", (data) => { stdout += data.toString(); });
+    proc.stderr.on("data", (data) => { stderr += data.toString(); });
+    proc.on("close", (code) => {
+      resolve({ exitCode: code, stdout, stderr });
+    });
+
+    proc.on("error", (err) => {
+      resolve({ error: err.message });
+    });
+  });
 });
 

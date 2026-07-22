@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Portals IDE</title>
+  <link rel="stylesheet" href="../node_modules/xterm/css/xterm.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -79,16 +80,50 @@
 
       <section class="terminal-panel panel panel-dark">
         <div class="panel-title">Terminal</div>
-        <div id="terminalOutput" class="terminal-output">Terminal ready. Type a command and press Enter or Run.</div>
-        <div class="terminal-input-row">
-          <span class="terminal-prompt">$</span>
-          <input id="terminalInput" type="text" placeholder="Run a command (example: pwd or dir)" />
-          <button id="terminalRun">Run</button>
+        <div id="terminalOutput" class="terminal-output"></div>
+      </section>
+
+      <section class="ai-panel panel panel-light" id="aiPanel" style="display: none;">
+        <div class="panel-title">AI Assistant</div>
+        <div class="ai-status">
+          <span id="aiStatus">Disconnected</span>
+          <button id="btnToggleAI" class="ai-toggle-btn">Enable AI</button>
+        </div>
+        <div id="aiChat" class="ai-chat">
+          <div class="ai-welcome">Chat with AI • It can access your files and terminal with permission</div>
+        </div>
+        <div class="ai-input-area">
+          <textarea id="aiInput" placeholder="Ask AI to help with code, commands, etc..." spellcheck="false"></textarea>
+          <button id="aiSend">Send</button>
         </div>
       </section>
     </main>
+
+    <div id="permissionDialog" class="modal-overlay" style="display: none;">
+      <div class="modal">
+        <div class="modal-title">Permission Required</div>
+        <div id="permissionContent" class="modal-content"></div>
+        <div class="modal-actions">
+          <button id="btnPermissionDeny" class="btn-deny">Deny</button>
+          <button id="btnPermissionAllow" class="btn-allow">Allow</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="passwordDialog" class="modal-overlay" style="display: none;">
+      <div class="modal">
+        <div class="modal-title">Enter Password for sudo</div>
+        <input id="sudoPassword" type="password" placeholder="Password" />
+        <div class="modal-actions">
+          <button id="btnPasswordCancel" class="btn-deny">Cancel</button>
+          <button id="btnPasswordSubmit" class="btn-allow">Submit</button>
+        </div>
+      </div>
+    </div>
   </div>
   <script src="theme.js"></script>
+  <script src="../node_modules/xterm/lib/xterm.js"></script>
+  <script src="../node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

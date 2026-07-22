@@ -36,6 +36,14 @@ Portals IDE is a clean Electron-based workspace for browsing the web and editing
 
 The app will use `TERMINAL_SHELL` for the built-in terminal if set, otherwise it falls back to your system `SHELL`.
 
+If the terminal area shows a dependency warning, run:
+
+```sh
+npm install
+```
+
+Then restart the app.
+
 ## Features
 
 - Modern and clean UI with browser and editor panels.

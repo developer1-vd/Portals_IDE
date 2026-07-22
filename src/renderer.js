@@ -10,8 +10,6 @@ const fileTree = document.getElementById("fileTree");
 const editorStatus = document.getElementById("editorStatus");
 const consoleLog = document.getElementById("consoleLog");
 const terminalOutput = document.getElementById("terminalOutput");
-const terminalInput = document.getElementById("terminalInput");
-const terminalRun = document.getElementById("terminalRun");
 const portalWebview = document.getElementById("portalWebview");
 const browserUrl = document.getElementById("browserUrl");
 const btnBack = document.getElementById("btnBack");
@@ -19,6 +17,82 @@ const btnForward = document.getElementById("btnForward");
 const btnReload = document.getElementById("btnReload");
 const btnGo = document.getElementById("btnGo");
 const linkButtons = Array.from(document.querySelectorAll(".link-button"));
+const aiPanel = document.getElementById("aiPanel");
+const btnToggleAI = document.getElementById("btnToggleAI");
+const aiChat = document.getElementById("aiChat");
+const aiInput = document.getElementById("aiInput");
+const aiSend = document.getElementById("aiSend");
+const aiStatus = document.getElementById("aiStatus");
+const permissionDialog = document.getElementById("permissionDialog");
+const btnPermissionAllow = document.getElementById("btnPermissionAllow");
+const btnPermissionDeny = document.getElementById("btnPermissionDeny");
+const permissionContent = document.getElementById("permissionContent");
+const passwordDialog = document.getElementById("passwordDialog");
+const btnPasswordSubmit = document.getElementById("btnPasswordSubmit");
+const btnPasswordCancel = document.getElementById("btnPasswordCancel");
+const sudoPassword = document.getElementById("sudoPassword");
+
+let terminal = null;
+let fitAddon = null;
+
+function setupTerminal() {
+  if (!window.Terminal || !window.FitAddon || !window.FitAddon.FitAddon) {
+    terminalOutput.textContent = "Terminal dependencies are missing. Run npm install in the project root.";
+    return;
+  }
+
+  terminal = new window.Terminal({
+    cursorBlink: true,
+    convertEol: true,
+    fontFamily: '"Fira Code", "JetBrains Mono", monospace',
+    fontSize: 14,
+    theme: {
+      background: "#111827",
+      foreground: "#e5e7eb"
+    }
+  });
+
+  fitAddon = new window.FitAddon.FitAddon();
+  terminal.loadAddon(fitAddon);
+  terminal.open(terminalOutput);
+
+  const fitTerminal = () => {
+    fitAddon.fit();
+    window.api.terminalResize(terminal.cols, terminal.rows);
+  };
+
+  window.api.onTerminalData((data) => {
+    terminal.write(data);
+  });
+
+  window.api.onTerminalExit(({ exitCode }) => {
+    terminal.writeln(`\r\n[terminal exited with code ${exitCode}]`);
+  });
+
+  terminal.onData((data) => {
+    window.api.terminalInput(data);
+  });
+
+  window.addEventListener("resize", fitTerminal);
+
+  setTimeout(async () => {
+    fitTerminal();
+    const startResult = await window.api.terminalStart({ cols: terminal.cols, rows: terminal.rows });
+    if (!startResult || !startResult.success) {
+      const errorMessage = startResult && startResult.error
+        ? startResult.error
+        : "Failed to start terminal session.";
+      terminal.writeln(`\r\n[${errorMessage}]`);
+    }
+    terminal.focus();
+  }, 0);
+
+  window.addEventListener("beforeunload", () => {
+    window.api.terminalKill();
+  });
+}
+
+setupTerminal();
 
 let currentFilePath = null;
 let isSaved = true;
@@ -32,42 +106,6 @@ function log(message, type = "info") {
 
 function setStatus(message) {
   editorStatus.textContent = message;
-}
-
-function appendTerminalOutput(text) {
-  const line = document.createElement("div");
-  line.textContent = text;
-  terminalOutput.appendChild(line);
-  terminalOutput.scrollTop = terminalOutput.scrollHeight;
-}
-
-async function runTerminalCommand() {
-  const command = terminalInput.value.trim();
-  if (!command) {
-    return;
-  }
-
-  appendTerminalOutput(`$ ${command}`);
-  terminalInput.value = "";
-  setStatus(`Running: ${command}`);
-
-  try {
-    const result = await window.api.runTerminalCommand(command);
-    if (result && result.output) {
-      appendTerminalOutput(result.output.trim());
-    }
-    if (result && result.error) {
-      appendTerminalOutput(result.error.trim());
-    }
-    if (result && result.success) {
-      setStatus(`Finished: ${command}`);
-    } else {
-      setStatus(`Command failed: ${command}`);
-    }
-  } catch (error) {
-    appendTerminalOutput(error.message || String(error));
-    setStatus("Terminal command failed");
-  }
 }
 
 function setFileName(name) {
@@ -131,15 +169,6 @@ btnNew.addEventListener("click", () => {
 btnOpen.addEventListener("click", openFile);
 btnSave.addEventListener("click", saveFile);
 btnSaveAs.addEventListener("click", saveFileAs);
-terminalInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    runTerminalCommand();
-  }
-});
-if (terminalRun) {
-  terminalRun.addEventListener("click", runTerminalCommand);
-}
 btnOpenFolder.addEventListener('click', async () => {
   const folder = await window.api.openFolder();
   if (!folder) {
@@ -241,8 +270,6 @@ function renderFileTree(tree, parent) {
   });
 }
 
-appendTerminalOutput("Terminal ready. Type a command and press Enter or Run.");
-
 linkButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const url = button.dataset.url;
@@ -251,5 +278,54 @@ linkButtons.forEach((button) => {
     setStatus(`Browsing ${url}`);
     log(`Opened ${url}`);
   });
+});
+
+let aiEnabled = false;
+let aiChatHistory = [];
+
+btnToggleAI.addEventListener("click", () => {
+  aiEnabled = !aiEnabled;
+  aiPanel.style.display = aiEnabled ? "flex" : "none";
+  btnToggleAI.textContent = aiEnabled ? "Disable AI" : "Enable AI";
+  aiStatus.textContent = aiEnabled ? "Connected" : "Disconnected";
+  if (aiEnabled) {
+    aiInput.focus();
+  }
+});
+
+function addAIMessage(text, role) {
+  const msg = document.createElement("div");
+  msg.className = `ai-message ${role}`;
+  msg.textContent = text;
+  aiChat.appendChild(msg);
+  aiChat.scrollTop = aiChat.scrollHeight;
+}
+
+async function sendAIMessage() {
+  const message = aiInput.value.trim();
+  if (!message) return;
+
+  addAIMessage(message, "user");
+  aiInput.value = "";
+
+  aiStatus.textContent = "Thinking...";
+  const result = await window.api.aiChat(message, aiChatHistory);
+
+  if (result.error) {
+    addAIMessage(`Error: ${result.error}`, "assistant");
+  } else {
+    aiChatHistory.push({ role: "user", content: message });
+    aiChatHistory.push({ role: "assistant", content: result.response });
+    addAIMessage(result.response, "assistant");
+  }
+
+  aiStatus.textContent = "Connected";
+}
+
+aiSend.addEventListener("click", sendAIMessage);
+aiInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.ctrlKey) {
+    sendAIMessage();
+  }
 });
 
